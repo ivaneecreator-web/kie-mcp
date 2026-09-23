@@ -10,12 +10,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync, mkdirSync, mkdtempSync, writeFileSync, symlinkSync, realpathSync } from 'node:fs';
 
 import {
   extractResultUrls,
   classifyKieCode,
   sanitizeFilename,
+  uploadPathGuard,
   normalizeBase64,
   resolveOutputDir,
   pollBudgetMs,
@@ -374,4 +375,79 @@ test('Sept 2026 model pass — new entries build the documented inputs', async (
     assert.equal(typeof PRICING[k], 'number', `${k} priced`);
   }
   assert.equal(PRICING['minimax-h3/text-to-video'], 8, 'H3 price halved Sept 2026');
+});
+
+test('uploadPathGuard — ContentKaki fork local-file upload guard', async (t) => {
+  // realpath the tmp root: on macOS tmpdir() is under /var → /private/var.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kie-guard-')));
+  const ok = join(root, 'project', 'outputs');
+  const refs = join(root, 'project', 'inputs', 'character-refs');
+  const secret = join(root, 'secret');
+  for (const d of [ok, refs, secret]) mkdirSync(d, { recursive: true });
+  const okFile = join(ok, 'bg.png');
+  const refFile = join(refs, 'face.jpg');
+  const secretFile = join(secret, 'key.txt');
+  for (const f of [okFile, refFile, secretFile]) writeFileSync(f, 'x');
+  const linkIn = join(ok, 'innocent.jpg');            // outside → points INTO character-refs
+  symlinkSync(refFile, linkIn);
+  const linkOut = join(refs, 'escape.png');           // inside character-refs → points out
+  symlinkSync(okFile, linkOut);
+  const secretLink = join(ok, 'notes.txt');           // outside → points into a denied dir
+  symlinkSync(secretFile, secretLink);
+  const allowEscape = join(ok, 'elsewhere.txt');      // inside allow dir → points outside it
+  symlinkSync(secretFile, allowEscape);
+  const noEnv = {};
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  await t.test('allowed path passes and returns the realpath', () => {
+    assert.deepEqual(uploadPathGuard(okFile, noEnv), { realPath: okFile });
+  });
+  await t.test('relative path rejected', () => {
+    assert.equal(uploadPathGuard('outputs/bg.png', noEnv).rule, 'absolute-path');
+    assert.equal(uploadPathGuard(undefined, noEnv).rule, 'absolute-path');
+  });
+  await t.test('character-refs file rejected, rule named in the error', () => {
+    const r = uploadPathGuard(refFile, noEnv);
+    assert.equal(r.rule, 'character-refs');
+    assert.match(r.error, /rule: character-refs/);
+  });
+  await t.test('character-refs matched case-insensitively on darwin, by component only', () => {
+    const upper = refFile.replace('character-refs', 'Character-Refs');
+    assert.equal(uploadPathGuard(upper, noEnv, 'darwin').rule, 'character-refs');
+    assert.equal(uploadPathGuard(join(ok, 'character-refs-notes.png'), noEnv).rule, 'exists', 'substring is not a component');
+  });
+  await t.test('.. traversal into character-refs rejected', () => {
+    assert.equal(uploadPathGuard(join(ok, '..', 'inputs', 'character-refs', 'face.jpg'), noEnv).rule, 'character-refs');
+  });
+  await t.test('symlink escape: link outside pointing into character-refs rejected', () => {
+    const r = uploadPathGuard(linkIn, noEnv);
+    assert.equal(r.rule, 'character-refs');
+    assert.match(r.error, /symlink/);
+  });
+  await t.test('symlink escape: link inside character-refs pointing out rejected', () => {
+    assert.equal(uploadPathGuard(linkOut, noEnv).rule, 'character-refs');
+  });
+  await t.test('KIE_UPLOAD_DENY_DIRS blocks direct paths and symlinks into them', () => {
+    const env = { KIE_UPLOAD_DENY_DIRS: `/nonexistent-dir:${secret}` };
+    assert.equal(uploadPathGuard(secretFile, env).rule, 'KIE_UPLOAD_DENY_DIRS');
+    assert.equal(uploadPathGuard(secretLink, env).rule, 'KIE_UPLOAD_DENY_DIRS');
+    assert.deepEqual(uploadPathGuard(okFile, env), { realPath: okFile });
+  });
+  await t.test('deny dir is a directory prefix, not a string prefix', () => {
+    assert.deepEqual(uploadPathGuard(okFile, { KIE_UPLOAD_DENY_DIRS: join(root, 'project', 'out') }), { realPath: okFile });
+  });
+  await t.test('relative deny/allow entry fails closed', () => {
+    assert.equal(uploadPathGuard(okFile, { KIE_UPLOAD_DENY_DIRS: 'secret' }).rule, 'KIE_UPLOAD_DENY_DIRS');
+    assert.equal(uploadPathGuard(okFile, { KIE_UPLOAD_ALLOW_DIRS: 'outputs' }).rule, 'KIE_UPLOAD_ALLOW_DIRS');
+  });
+  await t.test('KIE_UPLOAD_ALLOW_DIRS: inside passes, outside and symlink-out rejected', () => {
+    const env = { KIE_UPLOAD_ALLOW_DIRS: ok };
+    assert.deepEqual(uploadPathGuard(okFile, env), { realPath: okFile });
+    assert.equal(uploadPathGuard(secretFile, env).rule, 'KIE_UPLOAD_ALLOW_DIRS');
+    assert.equal(uploadPathGuard(allowEscape, env).rule, 'KIE_UPLOAD_ALLOW_DIRS');
+  });
+  await t.test('missing file and directory rejected', () => {
+    assert.equal(uploadPathGuard(join(ok, 'nope.png'), noEnv).rule, 'exists');
+    assert.equal(uploadPathGuard(ok, noEnv).rule, 'exists');
+  });
 });

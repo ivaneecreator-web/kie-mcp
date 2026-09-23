@@ -5,7 +5,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { writeFileSync, existsSync, mkdirSync, readdirSync, statSync, appendFileSync, readFileSync } from 'fs';
-import { join, basename, isAbsolute } from 'path';
+import { join, basename, isAbsolute, resolve, relative, sep } from 'path';
 import { createServer } from 'http';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
@@ -88,6 +88,72 @@ function resolveOutputDir(args) {
 // Strip any directory components a caller sneaks into filename (also blocks ../ traversal).
 function sanitizeFilename(name) {
   return name == null ? name : basename(String(name));
+}
+
+// ContentKaki fork: local-file upload guard. upload_file's file_path branch
+// reads any file the server process can see and sends it to kie's public temp
+// storage, so it is gated here. Rules (first match wins, the error names it):
+//   - relative path            → rejected (the server's cwd is not the caller's)
+//   - any path component named `character-refs`, on the path as given OR on its
+//     realpath → rejected (catches symlinks into and out of that folder)
+//   - inside a KIE_UPLOAD_DENY_DIRS entry (colon-separated absolute dirs),
+//     compared on both the given path and the realpath → rejected
+//   - KIE_UPLOAD_ALLOW_DIRS set → the realpath must sit inside one entry
+// Returns { realPath } on success or { error, rule }. The caller must read
+// realPath, not the path as given, so a swapped final symlink cannot redirect.
+// Case-insensitive on darwin/win32, whose default filesystems are.
+const DENY_COMPONENT = 'character-refs';
+function uploadPathGuard(filePath, env = process.env, platform = process.platform) {
+  const fold = platform === 'darwin' || platform === 'win32' ? (p) => p.toLowerCase() : (p) => p;
+  const inside = (child, parent) => {
+    const rel = relative(fold(parent), fold(child));
+    return rel === '' || (rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel));
+  };
+  const hasComponent = (p) => fold(p).split(sep).includes(DENY_COMPONENT);
+  const dirList = (name) => {
+    const raw = env?.[name];
+    if (!raw) return { dirs: [] };
+    const dirs = [];
+    for (const entry of String(raw).split(':')) {
+      if (!entry) continue;
+      if (!isAbsolute(entry)) return { error: `${name} entry must be an absolute path (got ${JSON.stringify(entry)}). Refusing all uploads until the config is fixed.` };
+      const forms = [resolve(entry)];
+      try { forms.push(realpathSync(entry)); } catch { /* missing dir: lexical form only */ }
+      dirs.push(forms);
+    }
+    return { dirs };
+  };
+
+  if (typeof filePath !== 'string' || !isAbsolute(filePath)) {
+    return { rule: 'absolute-path', error: `file_path must be an absolute path (got: ${filePath}).` };
+  }
+  const given = resolve(filePath);
+  if (hasComponent(given)) {
+    return { rule: DENY_COMPONENT, error: `Upload blocked (rule: ${DENY_COMPONENT}): ${filePath} is inside a ${DENY_COMPONENT} folder. Creator reference photos are never uploaded automatically.` };
+  }
+  let realPath;
+  try { realPath = realpathSync(given); } catch {
+    return { rule: 'exists', error: `file_path does not exist or is not a file: ${filePath}\nNote: the path is read by the MCP server process — if the server runs on a different machine (HTTP mode), use base64_data or file_url instead.` };
+  }
+  if (hasComponent(realPath)) {
+    return { rule: DENY_COMPONENT, error: `Upload blocked (rule: ${DENY_COMPONENT}): ${filePath} resolves to ${realPath}, inside a ${DENY_COMPONENT} folder (symlink). Creator reference photos are never uploaded automatically.` };
+  }
+  const deny = dirList('KIE_UPLOAD_DENY_DIRS');
+  if (deny.error) return { rule: 'KIE_UPLOAD_DENY_DIRS', error: deny.error };
+  for (const forms of deny.dirs) {
+    if (forms.some((d) => inside(given, d) || inside(realPath, d))) {
+      return { rule: 'KIE_UPLOAD_DENY_DIRS', error: `Upload blocked (rule: KIE_UPLOAD_DENY_DIRS): ${filePath}${realPath !== given ? ` (resolves to ${realPath})` : ''} is inside denied directory ${forms[0]}.` };
+    }
+  }
+  const allow = dirList('KIE_UPLOAD_ALLOW_DIRS');
+  if (allow.error) return { rule: 'KIE_UPLOAD_ALLOW_DIRS', error: allow.error };
+  if (allow.dirs.length && !allow.dirs.some((forms) => forms.slice(-1).some((d) => inside(realPath, d)))) {
+    return { rule: 'KIE_UPLOAD_ALLOW_DIRS', error: `Upload blocked (rule: KIE_UPLOAD_ALLOW_DIRS): ${filePath}${realPath !== given ? ` resolves to ${realPath}, which` : ''} is not inside any allowed directory.` };
+  }
+  if (!statSync(realPath).isFile()) {
+    return { rule: 'exists', error: `file_path does not exist or is not a file: ${filePath}` };
+  }
+  return { realPath };
 }
 
 // Normalize + validate base64 before sending it to kie's uploader, whose atob()
@@ -2667,20 +2733,18 @@ const handleCallTool = async (request) => {
           // the chain, so the ~11.7K-char tool-argument truncation (#68) and the
           // atob failure class (#62) cannot occur. Only meaningful when the
           // server shares a filesystem with the caller (stdio — the normal case).
-          if (!isAbsolute(file_path)) {
-            return { content: [{ type: 'text', text: `file_path must be an absolute path (got: ${file_path}).` }], isError: true };
+          const guard = uploadPathGuard(file_path);
+          if (guard.error) {
+            return { content: [{ type: 'text', text: guard.error }], isError: true };
           }
-          if (!existsSync(file_path) || !statSync(file_path).isFile()) {
-            return { content: [{ type: 'text', text: `file_path does not exist or is not a file: ${file_path}\nNote: the path is read by the MCP server process — if the server runs on a different machine (HTTP mode), use base64_data or file_url instead.` }], isError: true };
-          }
-          const size = statSync(file_path).size;
+          const size = statSync(guard.realPath).size;
           const MAX_UPLOAD = 100 * 1024 * 1024;
           if (size > MAX_UPLOAD) {
             return { content: [{ type: 'text', text: `File is ${(size / 1048576).toFixed(1)}MB — larger than the 100MB upload guard for kie temp storage.` }], isError: true };
           }
           const name = sanitizeFilename(file_name) || basename(file_path);
           const form = new FormData();
-          form.append('file', new Blob([readFileSync(file_path)]), name);
+          form.append('file', new Blob([readFileSync(guard.realPath)]), name);
           form.append('uploadPath', upload_path);
           form.append('fileName', name);
           const res = await fetch(`${UPLOAD_BASE}/api/file-stream-upload`, {
@@ -3137,6 +3201,7 @@ export {
   extractResultUrls,
   classifyKieCode,
   sanitizeFilename,
+  uploadPathGuard,
   normalizeBase64,
   resolveOutputDir,
   pollBudgetMs,
