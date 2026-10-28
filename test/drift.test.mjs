@@ -1,7 +1,7 @@
 // Unit tests for the drift-watch pure parsers (issue #44).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractGroups, extractPricing, parseCredits, advertisedRates, priceMatches, classifyProbe } from '../scripts/drift-watch.mjs';
+import { extractGroups, extractPricing, parseCredits, advertisedRates, priceMatches, classifyProbe, isTokenPriced } from '../scripts/drift-watch.mjs';
 
 test('extractGroups — parses market groups from embedded JSON', () => {
   const html = 'x &quot;groupName&quot;:&quot;Nano Banana 2 Lite&quot;,&quot;count&quot;:1,&quot;path&quot;:&quot;nano-banana-2-lite&quot; y';
@@ -44,4 +44,29 @@ test('classifyProbe — routed error = alive; only not-found/paused flagged', ()
   assert.equal(classifyProbe({ code: 500, msg: 'This interface is temporarily paused' }), 'paused');
   assert.equal(classifyProbe({ code: 404, msg: 'model not found' }), 'gone');
   assert.equal(classifyProbe({ code: 400, msg: 'invalid model' }), 'gone');
+});
+
+test('drift — thousands separators and token-metered pricing (2026-10-05)', () => {
+  const tts = 'Limited-time pricing: Input 70 credits / 1M tokens (≈ $0.35), Audio Output 1,260 credits / 1M tokens (≈ $6.30).';
+  assert.ok(advertisedRates(tts).includes(1260), '1,260 parses as 1260, not 260');
+  assert.ok(!advertisedRates(tts).includes(260));
+  assert.equal(isTokenPriced(tts), true);
+  assert.equal(isTokenPriced('Seedream 5.0 Flash: 3.24 credits per image'), false);
+  assert.ok(priceMatches(3.24, '1K and 2K images are priced the same: 3.24 credits per image ($0.0162).'));
+});
+
+test('live-check — docs index diff ignores /cn/ mirrors', async () => {
+  const { diffDocsIndex } = await import('../scripts/live-check.mjs');
+  const prev = '- [A](https://docs.kie.ai/market/a/x.md)\n- [Old](https://docs.kie.ai/market/old.md)\n- [CN](https://docs.kie.ai/cn/market/a/x.md)';
+  const next = '- [A](https://docs.kie.ai/market/a/x.md)\n- [Vidu Q4](https://docs.kie.ai/market/vidu-q4/image-to-video.md)\n- [CN2](https://docs.kie.ai/cn/market/new.md)';
+  const d = diffDocsIndex(prev, next);
+  assert.deepEqual(d.added, [{ page: 'market/vidu-q4/image-to-video.md', title: 'Vidu Q4' }]);
+  assert.deepEqual(d.removed, [{ page: 'market/old.md', title: 'Old' }]);
+  assert.equal(d.count, 2);
+});
+
+test('classifyProbe — 410 / retired counts as gone (Seedance 1.5 Pro, Oct 2026)', () => {
+  assert.equal(classifyProbe({ code: 410, msg: 'Seedance 1.5 Pro has been retired upstream and is no longer available on Kie.ai.' }), 'gone');
+  assert.equal(classifyProbe({ code: 200, msg: 'This model is no longer available' }), 'gone');
+  assert.equal(classifyProbe({ code: 500, msg: 'This field is required' }), 'healthy');
 });

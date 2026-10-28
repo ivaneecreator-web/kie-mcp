@@ -451,3 +451,229 @@ test('uploadPathGuard — ContentKaki fork local-file upload guard', async (t) =
     assert.equal(uploadPathGuard(ok, noEnv).rule, 'exists');
   });
 });
+
+test('image format sniffing — upload names follow the bytes, not the extension', async () => {
+  const { sniffImageExt, fixImageFilename } = await import('../server.mjs');
+  const pad = (arr) => Buffer.concat([Buffer.from(arr), Buffer.alloc(16)]);
+  const jpg = pad([0xff, 0xd8, 0xff, 0xe0]);
+  const png = pad([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const webp = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBPVP8 '), Buffer.alloc(8)]);
+  assert.equal(sniffImageExt(jpg), 'jpg');
+  assert.equal(sniffImageExt(png), 'png');
+  assert.equal(sniffImageExt(webp), 'webp');
+  assert.equal(sniffImageExt(Buffer.from('not an image at all')), null);
+  // the reported bug: JPEG bytes under a .png name
+  assert.deepEqual(fixImageFilename('maria-retail-1.png', jpg), { name: 'maria-retail-1.jpg', renamedFrom: 'maria-retail-1.png' });
+  assert.deepEqual(fixImageFilename('photo.jpeg', jpg), { name: 'photo.jpeg' }, 'jpeg ≡ jpg');
+  assert.deepEqual(fixImageFilename('a.png', png), { name: 'a.png' });
+  assert.deepEqual(fixImageFilename('noext', png), { name: 'noext.png', renamedFrom: 'noext' });
+  assert.deepEqual(fixImageFilename('clip.mp4', Buffer.alloc(32)), { name: 'clip.mp4' }, 'non-images untouched');
+});
+
+test('media sniffing — saved results keep their real format (download side)', async () => {
+  const { sniffFileExt, fixMediaFilename } = await import('../server.mjs');
+  const b = (...parts) => Buffer.concat([...parts.map((x) => (typeof x === 'string' ? Buffer.from(x, 'latin1') : Buffer.from(x))), Buffer.alloc(16)]);
+  assert.equal(sniffFileExt(b([0, 0, 0, 0x20], 'ftypisom')), 'mp4');
+  assert.equal(sniffFileExt(b([0, 0, 0, 0x14], 'ftypqt  ')), 'mov');
+  assert.equal(sniffFileExt(b([0, 0, 0, 0x20], 'ftypM4A ')), 'm4a');
+  assert.equal(sniffFileExt(b('RIFF', [0, 0, 0, 0], 'WAVEfmt ')), 'wav');
+  assert.equal(sniffFileExt(b('ID3', [4, 0, 0])), 'mp3');
+  assert.equal(sniffFileExt(b([0xff, 0xfb, 0x90, 0x64])), 'mp3', 'bare MPEG-1 layer III frame');
+  assert.equal(sniffFileExt(b([0xff, 0xf1, 0x50, 0x80])), 'aac', 'AAC ADTS is not mp3');
+  assert.equal(sniffFileExt(b('%PDF-1.7')), 'pdf');
+  assert.equal(sniffFileExt(b('OggS', [0, 2])), 'ogg');
+  assert.equal(sniffFileExt(b([0x1a, 0x45, 0xdf, 0xa3])), 'webm');
+  assert.equal(sniffFileExt(b('-----BEGIN OPENSSH PRIVATE KEY-----')), null, 'secrets are not media');
+  assert.equal(sniffFileExt(b('KIE_API_KEY=abc123')), null, '.env is not media');
+  assert.equal(sniffFileExt(b('MThd', [0, 0, 0, 6])), 'mid');
+  // the reported bug: Seedream JPEG saved under the requested .png name
+  const jpg = b([0xff, 0xd8, 0xff, 0xe0]);
+  assert.deepEqual(fixMediaFilename('maria-retail-1.png', jpg), { name: 'maria-retail-1.jpg', renamedFrom: 'maria-retail-1.png' });
+  // container aliases are not renamed
+  assert.deepEqual(fixMediaFilename('clip.mov', b([0, 0, 0, 0x20], 'ftypisom')), { name: 'clip.mov' });
+  assert.deepEqual(fixMediaFilename('voice.mp3', b('RIFF', [0, 0, 0, 0], 'WAVEfmt ')), { name: 'voice.wav', renamedFrom: 'voice.mp3' });
+});
+
+test('HTTP mode guards — token, Origin allowlist, Host (DNS rebinding) (5.2.2)', async () => {
+  const { checkHttpRequest } = await import('../server.mjs');
+  const cfg = { token: 's3cret-token', allowedOrigins: ['https://app.example'], allowedHosts: [], loopbackOnly: true };
+  const ok = { host: '127.0.0.1:3100', authorization: 'Bearer s3cret-token' };
+  assert.equal(checkHttpRequest(ok, cfg), null, 'valid token on loopback');
+  assert.equal(checkHttpRequest({ ...ok, host: 'localhost:3100' }, cfg), null);
+  assert.equal(checkHttpRequest({ host: '127.0.0.1:3100' }, cfg)?.status, 401, 'no token');
+  assert.equal(checkHttpRequest({ ...ok, authorization: 'Bearer wrong' }, cfg)?.status, 401, 'wrong token');
+  assert.equal(checkHttpRequest({ ...ok, authorization: 'Bearer s3cret-toke' }, cfg)?.status, 401, 'prefix of token');
+  assert.equal(checkHttpRequest({ ...ok, origin: 'https://evil.example' }, cfg)?.status, 403, 'foreign browser origin');
+  assert.equal(checkHttpRequest({ ...ok, origin: 'https://app.example' }, cfg), null, 'allowlisted origin');
+  assert.equal(checkHttpRequest({ ...ok, host: 'attacker.example' }, cfg)?.status, 403, 'DNS-rebinding Host on loopback');
+  assert.equal(checkHttpRequest({ host: 'attacker.example' }, cfg, { skipAuth: true })?.status, 403, 'host check runs even without auth');
+  assert.equal(checkHttpRequest({ ...ok, host: 'my.tunnel.dev' }, { ...cfg, allowedHosts: ['my.tunnel.dev'] }), null, 'allowlisted tunnel host');
+  assert.equal(checkHttpRequest({ ...ok, host: 'anything.example' }, { ...cfg, loopbackOnly: false }), null, 'non-loopback bind relies on the token');
+  assert.equal(checkHttpRequest(ok, { ...cfg, token: '' })?.status, 401, 'empty configured token never matches');
+});
+
+test('SSRF guard — private, loopback, link-local and metadata addresses (5.2.2)', async () => {
+  const { isPrivateIp, isPrivateUrl } = await import('../server.mjs');
+  for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '::1', 'fd00::1', 'fe80::1', '::ffff:127.0.0.1']) {
+    assert.equal(isPrivateIp(ip), true, ip);
+  }
+  for (const ip of ['8.8.8.8', '172.32.0.1', '1.1.1.1', '2606:4700::1111']) assert.equal(isPrivateIp(ip), false, ip);
+  assert.equal(await isPrivateUrl('http://169.254.169.254/latest/meta-data/'), true);
+  assert.equal(await isPrivateUrl('http://localhost:8080/x.png'), true);
+  assert.equal(await isPrivateUrl('http://[::1]/x.png'), true);
+  assert.equal(await isPrivateUrl('file:///etc/passwd'), true, 'non-http schemes');
+  assert.equal(await isPrivateUrl('not a url'), true);
+  assert.equal(await isPrivateUrl('https://8.8.8.8/x.png'), false, 'public IP literal (no DNS needed)');
+});
+
+test('v5.4.0 — Seedream 5.0 Flash entries and pricing', async () => {
+  const { MODEL_REGISTRY, PRICING } = await import('../server.mjs');
+  const t2i = MODEL_REGISTRY['seedream/5-flash-text-to-image'];
+  assert.deepEqual(t2i.buildInput('p', '21:9', [], { size: '2K' }), { prompt: 'p', aspect_ratio: '21:9', size: '2K', output_format: 'png' });
+  const i2i = MODEL_REGISTRY['seedream/5-flash-image-to-image'];
+  assert.equal(i2i.buildInput('p', undefined, Array(12).fill('u'), {}).image_urls.length, 10, 'caps refs at 10');
+  for (const k of ['seedream/5-flash-text-to-image', 'seedream/5-flash-image-to-image', 'seedream/5-flash-layer-decomposition']) assert.equal(PRICING[k], 3.24, k);
+});
+
+test('Suno market migration — request translation and result adapter (Oct 2026)', async () => {
+  const { camelToSnake, sunoMarketInput, normalizeSunoMarketRecord, extractResultUrls } = await import('../server.mjs');
+  assert.equal(camelToSnake('customMode'), 'custom_mode');
+  assert.equal(camelToSnake('infillStartS'), 'infill_start_s');
+  assert.equal(camelToSnake('audioId'), 'audio_id');
+  assert.equal(camelToSnake('domainName'), 'domain_name');
+  assert.deepEqual(
+    sunoMarketInput({ prompt: 'p', customMode: true, negativeTags: 'x', callBackUrl: 'cb', defaultParamFlag: true, vocalStart: 1, title: undefined, uploadUrl: 'u' }),
+    { prompt: 'p', custom_mode: true, negative_tags: 'x', upload_url: 'u' },
+    'legacy-only fields and undefined values are dropped');
+  // live shape captured 2026-10-05 (ai-music-api/generate)
+  const gen = { state: 'success', creditsConsumed: 12, resultJson: JSON.stringify({ code: 200, data: [
+    { id: 'a1', audio_url: 'https://x/a1.mp3', stream_audio_url: 'https://s/a1', image_url: 'https://i/a1.jpg', title: 'T', tags: 'pop', duration: 28.6, model_name: 'chirp-hawk' },
+    { id: 'a2', audio_url: 'https://x/a2.mp3', stream_audio_url: 'https://s/a2', image_url: 'https://i/a2.jpg', title: 'T', tags: 'pop', duration: 30 },
+  ], task_id: 't' }) };
+  const n = normalizeSunoMarketRecord(gen);
+  assert.equal(n.status, 'SUCCESS');
+  assert.deepEqual(n.sunoData.map((t) => [t.id, t.audioUrl, t.imageUrl]), [['a1', 'https://x/a1.mp3', 'https://i/a1.jpg'], ['a2', 'https://x/a2.mp3', 'https://i/a2.jpg']]);
+  assert.deepEqual(extractResultUrls(gen), ['https://x/a1.mp3', 'https://x/a2.mp3'], 'download_result takes audio only — no cover images or stream URLs');
+  // lyrics + cover-generate shapes
+  assert.equal(normalizeSunoMarketRecord({ resultJson: JSON.stringify({ resultObject: { lyricsData: [{ text: '[Verse] hi' }] } }) }).sunoData[0].text, '[Verse] hi');
+  assert.deepEqual(normalizeSunoMarketRecord({ resultJson: JSON.stringify({ resultUrls: ['https://c/1.png'] }) }).images, ['https://c/1.png']);
+});
+
+test('Nano Banana 2.1 entry and NB2 repricing (Oct 2026)', async () => {
+  const { MODEL_REGISTRY, PRICING } = await import('../server.mjs');
+  const nb21 = MODEL_REGISTRY['nano-banana-2-1'];
+  assert.equal(nb21.apiModel, 'nano-banana-2-1');
+  assert.deepEqual(nb21.buildInput('p', '1:8', Array(12).fill('u'), { resolution: '2K' }),
+    { prompt: 'p', aspect_ratio: '1:8', resolution: '2K', output_format: 'jpg', image_input: Array(10).fill('u') });
+  assert.equal(PRICING['nano-banana-2-1'], 4);
+  assert.equal(PRICING['nano-banana-2'], 8, 'kie doubled NB2 in Oct 2026');
+  assert.ok(MODEL_REGISTRY['nano-banana-2'].aspectRatios.includes('8:1'));
+});
+
+test('Vidu Q4 + Seedance 2.5 draft pipeline entries (Oct 2026)', async () => {
+  const { VIDEO_MODEL_REGISTRY: V, PRICING } = await import('../server.mjs');
+  assert.deepEqual(V['vidu-q4/image-to-video'].buildInput('p', undefined, ['i'], { duration: 3, resolution: '540p' }),
+    { prompt: 'p', image_url: 'i', duration: 3, resolution: '540p' });
+  const r2v = V['vidu-q4/reference-to-video'].buildInput('p', '9:16', Array(20).fill('u'), { reference_audio_urls: ['a', 'b', 'c', 'd'] });
+  assert.equal(r2v.reference_image_urls.length, 15);
+  assert.equal(r2v.reference_audio_urls.length, 3);
+  const sd = V['bytedance/seedance-2-5'];
+  assert.equal(sd.buildInput('p', '16:9', [], { draft: true }).resolution, '480p', 'draft forces 480p');
+  assert.throws(() => sd.buildInput('p', '16:9', [], { draft: true, resolution: '1080p' }), /480p only/);
+  assert.equal(sd.buildInput('p', '16:9', [], { resolution: '1080p', generate_audio: false }).generate_audio, false, 'explicit audio off is sent (kie default is on)');
+  assert.throws(() => V['bytedance/seedance-2-5-draft'].buildInput('x', undefined, [], {}), /draft_task_id/);
+  assert.deepEqual(V['bytedance/seedance-2-5-draft'].buildInput('x', undefined, [], { draft_task_id: 't' }), { draft_task_id: 't', resolution: '1080p', output_format: 'mp4' }, 'output_format is required in practice');
+  assert.equal(PRICING['vidu-q4/image-to-video'], 15.2);
+});
+
+test('spending guard — tiered estimates, estimate_only, max_credits (v5.8.0)', async () => {
+  const { estimateCallCredits, spendGuard } = await import('../server.mjs');
+  assert.equal(estimateCallCredits('generate_image', { model: 'nano-banana-2', model_options: { resolution: '4K' } }).credits, 18);
+  assert.equal(estimateCallCredits('generate_image', { model: 'nano-banana-2-1' }).credits, 4, 'flat default tier');
+  assert.equal(estimateCallCredits('generate_video', { model: 'vidu-q4/image-to-video', model_options: { resolution: '1080p', duration: 5 } }).credits, 96);
+  assert.equal(estimateCallCredits('generate_video', { model: 'bytedance/seedance-2-5', model_options: { draft: true, duration: 4 } }).credits, 112, 'draft forces the 480p rate');
+  assert.equal(estimateCallCredits('generate_video', { model: 'bytedance/seedance-2-5', model_options: { resolution: '1080p', duration: 4 } }).credits, 632);
+  const layers = estimateCallCredits('seedream_layer_decompose', { tier: 'flash', image_url: 'u' });
+  assert.equal(layers.uncertain, true);
+  assert.equal(layers.credits, 38.88, 'prompt-less flash split assumes ~12 layers');
+  assert.equal(estimateCallCredits('generate_music', { prompt: 'x' }).credits, 12);
+  assert.equal(estimateCallCredits('separate_vocals', { type: 'split_stem' }).credits, 50);
+  assert.equal(estimateCallCredits('grok_segment_map', {}), null, 'free tool → no estimate');
+
+  const est = spendGuard('generate_video', { model: 'bytedance/seedance-2-5', model_options: { resolution: '1080p', duration: 4 }, estimate_only: true });
+  assert.match(est.content[0].text, /632 credits/);
+  assert.match(est.content[0].text, /Nothing was submitted/);
+  const refused = spendGuard('generate_video', { model: 'bytedance/seedance-2-5', model_options: { resolution: '1080p', duration: 4 }, max_credits: 200 });
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, /exceeds max_credits=200/);
+  assert.equal(spendGuard('generate_image', { model: 'nano-banana-2-1', max_credits: 10 }), null, 'under the cap → proceed');
+  assert.equal(spendGuard('generate_image', { model: 'nano-banana-2-1' }), null, 'no guard params → proceed');
+  assert.equal(spendGuard('list_models', { estimate_only: true }), null, 'non-paid tools are never guarded');
+});
+
+test('summarizeSpend — actual vs estimated vs failed, windows, grouping (v5.8.0)', async () => {
+  const { summarizeSpend } = await import('../server.mjs');
+  const now = Date.parse('2026-10-14T12:00:00Z');
+  const entries = [
+    { taskId: 'a', model: 'nano-banana-2', createdAt: '2026-10-14T10:00:00Z', status: 'downloaded', credits: 8 },
+    { taskId: 'b', model: 'nano-banana-2', createdAt: '2026-10-13T10:00:00Z', status: 'downloaded' },          // no actual → PRICING est. (8)
+    { taskId: 'c', model: 'vidu-q4/reference-to-video', createdAt: '2026-10-14T09:00:00Z', status: 'success', credits: 21.6 },
+    { taskId: 'd', model: 'nano-banana-2', createdAt: '2026-10-14T08:00:00Z', status: 'failed' },             // refunded → not counted
+    { taskId: 'e', model: 'nano-banana-2', createdAt: '2026-09-01T08:00:00Z', status: 'downloaded', credits: 4 }, // outside 7-day window
+    { taskId: 'f', model: 'some/unknown-model', createdAt: '2026-10-14T07:00:00Z', status: 'downloaded' },
+    { taskId: 'g', model: 'suno/lyrics', createdAt: '2026-10-14T06:00:00Z', status: 'success' },  // alias → suno/generate-lyrics (0.4)
+    { taskId: 'h', model: 'suno-V5', createdAt: '2026-10-14T05:00:00Z', status: 'downloaded' },   // alias → suno-music (12)
+  ];
+  const s = summarizeSpend(entries, { days: 7, now });
+  assert.equal(s.totals.actual, 29.6);
+  assert.equal(s.totals.estimated, 20.4, 'NB2 8 + suno lyrics 0.4 + suno music 12 via aliases');
+  assert.equal(s.totals.failed, 1);
+  assert.equal(s.totals.unpriced, 1);
+  assert.equal(s.rows[0].key, 'vidu-q4/reference-to-video', 'sorted by spend');
+  const byDay = summarizeSpend(entries, { days: 7, now, groupBy: 'day' });
+  assert.deepEqual(byDay.rows.map((r) => r.key).sort(), ['2026-10-13', '2026-10-14']);
+});
+
+test('FLUX 3 Klein entries and tiered pricing (Oct 2026, #121)', async () => {
+  const { MODEL_REGISTRY, PRICING, estimateCallCredits } = await import('../server.mjs');
+  const t2i = MODEL_REGISTRY['flux-3/klein-text-to-image'];
+  assert.deepEqual(t2i.buildInput('p', '21:9', [], { resolution: '2K', enhance_prompt: false }),
+    { prompt: 'p', aspect_ratio: '21:9', resolution: '2K', output_format: 'png', enhance_prompt: false });
+  const edit = MODEL_REGISTRY['flux-3/klein-edit-image'];
+  assert.ok(edit.requiresImage);
+  assert.deepEqual(edit.buildInput('p', undefined, Array(12).fill('u'), { seed: 7 }),
+    { prompt: 'p', image_urls: Array(10).fill('u'), aspect_ratio: 'auto', resolution: '1K', output_format: 'png', seed: 7 });
+  assert.equal(PRICING['flux-3/klein-text-to-image'], 1.6);
+  assert.equal(estimateCallCredits('generate_image', { model: 'flux-3/klein-edit-image', model_options: { resolution: '4K' } }).credits, 6.5);
+});
+
+test('v5.10.0 — Kling 4.0, PixVerse V6 Max, OmniHuman 2.0 entries + estimates', async () => {
+  const { VIDEO_MODEL_REGISTRY: V, estimateCallCredits } = await import('../server.mjs');
+  const r2v = V['kling-4/reference-to-video'];
+  const el = { name: 'Hero', image_urls: ['a', 'b'] };
+  const i = r2v.buildInput('@Hero waves to @Narrator', undefined, ['x'], { elements: [el], voices: [{ name: 'Narrator', audio_url: 'v' }], duration: 10 });
+  assert.deepEqual([i.aspect_ratio, i.duration, i.image_urls, i.elements.length, i.voices.length], ['auto', 10, ['x'], 1, 1]);
+  assert.throws(() => r2v.buildInput('p', 'auto', [], { elements: [{ name: 'image_1', image_urls: ['a', 'b'] }] }), /invalid element\/voice name/);
+  assert.throws(() => r2v.buildInput('p', 'auto', [], { elements: [el], voices: [{ name: 'hero', audio_url: 'v' }] }), /duplicate name/);
+  assert.throws(() => r2v.buildInput('p', 'auto', [], { elements: [{ name: 'X', image_urls: ['a'] }] }), /2-4 image_urls/);
+  assert.throws(() => r2v.buildInput('p', 'auto', [], { elements: [{ name: 'X', image_urls: ['a', 'b'], video_url: 'v' }] }), /EITHER/);
+  assert.throws(() => r2v.buildInput('p', 'auto', [], { video_urls: ['1', '2', '3', '4', '5'], elements: [{ name: 'V', video_url: 'v' }] }), /total ≤ 5/);
+
+  const kf = V['kling-4/keyframe-to-video'].buildInput('p', '16:9', ['f', 'k1', 'k2', 'l'], {});
+  assert.deepEqual([kf.first_frame_url, kf.keyframe_urls, kf.last_frame_url], ['f', ['k1', 'k2'], 'l'], 'image_urls → first, middle, last');
+  assert.deepEqual(V['kling-4/keyframe-to-video'].buildInput('p', 'auto', ['only'], {}).last_frame_url, undefined, 'single image = first frame only');
+
+  assert.deepEqual(V['pixverse-v6-max/image-to-video'].buildInput('p', undefined, ['a', 'b'], { quality: '360p', duration: 1 }), { prompt: 'p', image_urls: ['a'], quality: '360p', duration: 1 });
+  const oh = V['omnihuman-2-0'].buildInput('wave', undefined, ['img'], { audio_url: 'a.mp3' });
+  assert.equal(oh.enable_watermark, false, 'watermark off unless asked (kie default is on)');
+  assert.throws(() => V['omnihuman-2-0'].buildInput('p', undefined, ['img'], {}), /audio_url/);
+
+  const est = (model, model_options) => estimateCallCredits('generate_video', { model, model_options });
+  assert.equal(est('kling-4/reference-to-video', { resolution: '1080p', duration: 10 }).credits, 425);
+  assert.equal(est('kling-4/reference-to-video', { video_urls: ['v'], duration: 5 }).credits, 170, 'with video input: 17 cr/s × (out + in)');
+  assert.equal(est('pixverse-v6-max/text-to-video', { quality: '1080p', generate_audio_switch: true, duration: 5 }).credits, 112);
+  assert.equal(est('pixverse-v6-max/text-to-video', { duration: 5 }).credits, 44, '720p no-audio default');
+  assert.equal(est('omnihuman-2-0', { audio_duration: 60 }).credits, 840);
+  assert.equal(est('omnihuman-2-0', {}).uncertain, true, 'unknown audio length → flagged');
+  assert.equal(V['seedance/text-to-video'], undefined, 'Seedance 1.5 Pro retired upstream (410) — removed');
+});

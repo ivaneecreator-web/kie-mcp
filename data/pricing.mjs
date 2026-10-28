@@ -19,13 +19,16 @@ export const PRICING = {
   'grok-imagine/image-to-image': 4,
   'grok-imagine-image-2-0/text-to-image': 4,   // empirical 2026-08-14: exactly 4.0 cr
   'grok-imagine-image-2-0/segment-map': 0,     // empirical 2026-08-14: FREE (0.0 cr) — returns named regions + mask PNGs
-  'grok-imagine-image-2-0/image-edit': 4,      // empirical 2026-08-14: exactly 4.0 cr per region-targeted edit
+  'grok-imagine-image-2-0/image-edit': 4,      // whole-image edit; empirical 2026-09-28: exactly 4.0 cr
+  'grok-imagine-image-2-0/segment-edit': 4,    // region edit (split out of image-edit Sept 2026); empirical 2026-09-28: exactly 4.0 cr
   'flux-2/pro-text-to-image': 5,
   'flux-2/pro-image-to-image': 5,
   'flux-2/flex-text-to-image': 4,
   'flux-2/flex-image-to-image': 4,
+  'flux-3/klein-text-to-image': 1.6,  // FLUX 3 Klein (Oct 2026): 1.6 / 2.5 / 6.5 cr per image at 1K / 2K / 4K (docs + kie.ai/flux-3; live 1K 1.6, 2026-10-19)
+  'flux-3/klein-edit-image': 1.6,    // same tiers; up to 10 refs free (live 1K 1.6, 2026-10-19)
   'bytedance/seedream': 3.5,
-  'bytedance/seedream-v4-text-to-image': 3.5,
+  'bytedance/seedream-v4-text-to-image': 5,   // empirical 2026-09-24: a square T2I charged exactly 5.0 (table said 3.5)
   'bytedance/seedream-v4-edit': 3.5,
   'seedream/4.5-text-to-image': 5,
   'seedream/4.5-edit': 5,
@@ -34,7 +37,8 @@ export const PRICING = {
   'google/imagen4-ultra': 12, // kie raised 10→12 (drift watch 2026-09-22)
   'google/nano-banana': 4,
   'google/nano-banana-edit': 4,
-  'nano-banana-2': 4,
+  'nano-banana-2': 8,                  // kie doubled it Oct 2026: 8 / 12 / 18 cr at 1K / 2K / 4K (live 1K charge 8.0, 2026-10-07; was 4)
+  'nano-banana-2-1': 4,                // Nano Banana 2.1 (Oct 2026): 4 / 6 / 9 cr at 1K / 2K / 4K (live 1K 4.0, 2K 6.0)
   'nano-banana-2-lite': 4,             // empirical 2026-07-02: one 1K gen consumed exactly 4.00 credits (kie's site advertises 3 — the balance delta says otherwise)
   'nano-banana-pro': 24,
   'omnihuman-1-5/subject-detection': 0, // FREE — empirical 2026-07-02: creditsConsumed=0 on a live run
@@ -58,12 +62,15 @@ export const PRICING = {
   'qwen2/text-to-image': 3,
   'qwen2-1/text-to-image': 4,      // Qwen Image 2.1 (Sept 2026) — kie published: 4 cr @1K, 8 @2K; 1K empirically 4.0 (T2I + I2I, 2026-09-22)
   'qwen2-1/image-to-image': 4,     // same tiers
-  'recraft/crisp-upscale': 2,
+  'recraft/crisp-upscale': 0.5,   // kie cut 2→0.5 (drift watch 2026-09-28; empirically 0.5)
   'recraft/remove-background': 1, // kie cut 2→1 (drift watch 2026-09-22; empirically 1.0)
   'topaz/image-upscale': 4,
   'seedream/5-pro-text-to-image': 7,       // 1K/1.5K; 2K 14 (published, drift 2026-08-26)
   'seedream/5-pro-image-to-image': 7,      // + 0.5 cr per input image, first free
   'seedream/5-pro-layer-decomposition': 7, // PER OUTPUT LAYER incl. base (1K; 2K 14)
+  'seedream/5-flash-text-to-image': 3.24,        // Seedream 5.0 Flash (Oct 2026) — kie published: 3.24 cr flat at 1K/1.5K/2K
+  'seedream/5-flash-image-to-image': 3.24,
+  'seedream/5-flash-layer-decomposition': 3.24,  // PER OUTPUT LAYER incl. base, any size
   'seedream/5-lite-text-to-image': 5,
   'seedream/5-lite-image-to-image': 5,
   'wan/2-7-image': 4.8,       // kie raised it (drift watch 2026-07-27; was 4)
@@ -82,8 +89,6 @@ export const PRICING = {
   'runway/aleph-edit': 6,
   'seedance-2/text-to-video': 25,     // 720p with video input, per second
   'seedance-2-fast/text-to-video': 20,// 720p with video input, per second
-  'seedance/text-to-video': 8,
-  'seedance/image-to-video': 8,
   'wan/text-to-video': 4,
   'wan/image-to-video': 4,
   'wan/flash-image-to-video': 6,   // measured 2026-08-05 (#69): 6× exactly 30 cr per 5s take at defaults; a second run averaged 8 cr/s — see PRICING_ESTIMATED
@@ -159,6 +164,9 @@ export const PRICING = {
   'grok-imagine-video-1-5-preview': 3,
   // ── Seedance 2.5 (July 2026) — kie pricing UNPUBLISHED at launch; 25 cr/s placeholder
   //    matching Seedance 2.0. Runtime [actual] creditsConsumed is ground truth. ──
+  'bytedance/seedance-2-5-draft': 158, // Oct 2026 — 1080p upgrade of a draft: standard 1080p rate (158/s no video input, 95 with) × the draft's duration
+  'vidu-q4/image-to-video': 15.2,      // Vidu Q4 (Oct 2026) — published per second: 540p 7.2, 720p 15.2 (default), 1080p 19.2, 2K 30.4, 4K 62.4
+  'vidu-q4/reference-to-video': 15.2,  // same tiers
   'bytedance/seedance-2-5': 63,  // kie published 2026-08: 480p 28 (17 w/video-input), 720p 63 (38 w/video); entry default 720p. 480p rate empirically confirmed: 4s cost exactly 112 cr
   // ── PixVerse V6 (added July 2026) — kie published per-second tiers; table = 720p no-audio default.
   //    T2V/I2V/transition/extend: 360p 4.0/5.6, 540p 5.6/7.2, 720p 7.2/9.6, 1080p 14.4/18.4 (no-audio/audio).
@@ -170,6 +178,11 @@ export const PRICING = {
   'pixverse-v6/reference-to-video': 8.1,
   // ── OmniHuman 1.5 — kie published: 27 cr/s (billed on output = audio length) ──
   'omnihuman-1-5': 27,
+  'omnihuman-2-0': 14,                 // Oct 2026 — published: 14 cr/s, billed on output (= audio) duration, 720p
+  'kling-4/reference-to-video': 28.5,  // Kling 4.0 (Oct 2026) — 720p 28.5 / 1080p 42.5 cr/s; with video input 17 / 25.5 cr/s × (input + output)
+  'kling-4/keyframe-to-video': 28.5,   // 720p 28.5 / 1080p 42.5 cr/s on output duration
+  'pixverse-v6-max/text-to-video': 8.8,   // PixVerse V6 Max (Oct 2026) — 720p no-audio default; see PRICE_TIERS
+  'pixverse-v6-max/image-to-video': 8.8,
   // ── Volcengine lip-sync — kie published: 8 cr/s of generated video (follows audio duration) ──
   'volcengine/video-to-video-lip-sync': 8,
   // ── Gemini Omni (Google, May 2026) ──
@@ -179,32 +192,36 @@ export const PRICING = {
   'gemini-omni/character-create': 5,      // flat per character
 
   // ── Audio Models ──
-  'suno-music': 10,                   // flat per track
-  'suno/extend-music': 10,
-  'suno/cover-audio': 10,
-  'suno/add-instrumental': 10,
-  'suno/add-vocals': 10,
-  'suno/replace-section': 8,
-  'suno/generate-lyrics': 2,
-  'suno/convert-to-wav': 2,
-  'suno/separate-vocals': 5,
+  'suno-music': 12,                   // flat per request (kie published Oct 2026; was 10)
+  'suno/extend-music': 12,
+  'suno/cover-audio': 12,
+  'suno/add-instrumental': 12,
+  'suno/add-vocals': 12,
+  'suno/replace-section': 5,
+  'suno/generate-lyrics': 0.4,   // live 2026-10-05: 0.4
+  'suno/convert-to-wav': 0.4,    // live 2026-10-05: 0.4
+  'suno/separate-vocals': 10,    // separate_vocal; split_stem 50 (published). live 2026-10-05: 10
   'suno/generate-midi': 5,
-  'suno/create-music-video': 8,
-  'suno/generate-sounds': 5,
-  'suno/generate-persona': 5,
-  'suno/generate-mashup': 8,
+  'suno/create-music-video': 2,  // live 2026-10-05: 2
+  'suno/generate-sounds': 2.5,   // live 2026-10-05: 2.5
+  'suno/generate-persona': 0,    // free (published)
+  'suno/generate-mashup': 12,
   // ── Suno Voice API (custom voice cloning, #20) ──
   'suno/voice-validate': 0,    // "Generate Voice" — free (kie marketing 2026-07-12)
-  'suno/voice-generate': 5,    // estimate — pricing not disclosed; flagged below
+  'suno/voice-generate': 0,    // "Generate Voice is free" (kie published Oct 2026)
   'suno/voice-regenerate': 5,  // estimate
-  'suno/boost-style': 2,
-  'suno/timestamped-lyrics': 2,
-  'suno/cover-art': 4,
-  'suno/upload-extend': 10,
+  'suno/boost-style': 0.4,       // live 2026-10-05: 0.4
+  'suno/timestamped-lyrics': 0.5,
+  'suno/cover-art': 0,            // free (published; live 2026-10-05: 0)
+  'suno/upload-extend': 12,
   // Gemini TTS (July 2026) — token-priced upstream (140 cr/1M input, 2800 cr/1M audio-out;
   // Google bills 25 audio tokens/sec → ~4.2 cr per MINUTE of audio). Value below ≈ 1 minute.
   'google/gemini-3-1-flash-tts': 4.2,
   'google/gemini-2-5-pro-tts': 4.2,
+  // Gemini 3.8 TTS (Sept 2026) — kie limited-time pricing until 2026-12-31: Flash 70 in / 1260 out, Flash Lite 70 / 840 cr per 1M tokens.
+  // Same ~1 minute basis as above. Empirical, same 25-word line: 3.1 Flash 1.38 cr, 3.8 Flash 0.82, 3.8 Flash Lite 0.29.
+  'google/gemini-3-8-flash-tts': 1.89,
+  'google/gemini-3-8-flash-lite-tts': 1.26,
   'elevenlabs/text-to-speech-turbo-2-5': 6,  // per 1000 chars, ceil-rounded (empirical 2026-06-11: 35/150/600 chars→6, 1500→12, 3000→18)
   'elevenlabs/text-to-speech-multilingual-v2': 12, // per 1000 chars, ceil-rounded (empirical 2026-06-11: 33/150 chars→12, 1500→24)
   'elevenlabs/text-to-dialogue-v3': 14, // per 1000 chars, linear no rounding (empirical 2026-06-11: 67 chars→0.98, 1330→18.62)
@@ -216,6 +233,43 @@ export const PRICING = {
   'veo/1080p': 5,                      // flat per upscale (empirical 2026-06-01)
   'veo/4k': 120,                       // flat per upscale (empirical 2026-06-01)
   'runway/extend': 6,                  // per second
+};
+
+// Resolution/size-tiered prices (credits per image, or per second for video),
+// keyed by registry id. `opt` names the model_options field that picks the tier;
+// a missing value falls back to the flat PRICING entry. Used by the
+// estimate_only / max_credits guard (estimateCallCredits in server.mjs).
+export const PRICE_TIERS = {
+  'nano-banana-2': { opt: 'resolution', prices: { '1K': 8, '2K': 12, '4K': 18 } },
+  'nano-banana-2-1': { opt: 'resolution', prices: { '1K': 4, '2K': 6, '4K': 9 } },
+  'flux-3/klein-text-to-image': { opt: 'resolution', prices: { '1K': 1.6, '2K': 2.5, '4K': 6.5 } },
+  'flux-3/klein-edit-image': { opt: 'resolution', prices: { '1K': 1.6, '2K': 2.5, '4K': 6.5 } },
+  'gpt-image-2-5/flare-text-to-image': { opt: 'resolution', prices: { '1K': 6, '2K': 10, '4K': 16 } },
+  'gpt-image-2-5/flare-image-to-image': { opt: 'resolution', prices: { '1K': 6, '2K': 10, '4K': 16 } },
+  'gpt-image-2-5/sunburst-text-to-image': { opt: 'resolution', prices: { '1K': 6, '2K': 10, '4K': 16 } },
+  'gpt-image-2-5/sunburst-image-to-image': { opt: 'resolution', prices: { '1K': 6, '2K': 10, '4K': 16 } },
+  'qwen2-1/text-to-image': { opt: 'resolution', prices: { '1K': 4, '2K': 8 } },
+  'qwen2-1/image-to-image': { opt: 'resolution', prices: { '1K': 4, '2K': 8 } },
+  'qwen3/pro-text-to-image': { opt: 'resolution', prices: { '1K': 6.4, '2K': 12 } },
+  'qwen3/pro-image-to-image': { opt: 'resolution', prices: { '1K': 6.4, '2K': 12 } },
+  'seedream/5-pro-text-to-image': { opt: 'size', prices: { '1K': 7, '1.5K': 7, '2K': 14 } },
+  'seedream/5-pro-image-to-image': { opt: 'size', prices: { '1K': 7, '1.5K': 7, '2K': 14 } },
+  // video — credits per second
+  'vidu-q4/image-to-video': { opt: 'resolution', prices: { '540p': 7.2, '720p': 15.2, '1080p': 19.2, '2k': 30.4, '4k': 62.4 } },
+  'vidu-q4/reference-to-video': { opt: 'resolution', prices: { '540p': 7.2, '720p': 15.2, '1080p': 19.2, '2k': 30.4, '4k': 62.4 } },
+  'bytedance/seedance-2-5': { opt: 'resolution', prices: { '480p': 28, '720p': 63, '1080p': 158 } },
+  'minimax-h3/text-to-video': { opt: 'resolution', prices: { '768P': 8, '2K': 13 } },
+  'minimax-h3/image-to-video': { opt: 'resolution', prices: { '768P': 8, '2K': 13 } },
+  'minimax-h3/reference-to-video': { opt: 'resolution', prices: { '768P': 8, '2K': 13 } },
+  'grok-imagine/text-to-video': { opt: 'resolution', prices: { '480p': 2.4, '720p': 4.5, '1080p': 8 } },
+  'grok-imagine/image-to-video': { opt: 'resolution', prices: { '480p': 2.4, '720p': 4.5, '1080p': 8 } },
+  'wan/3-0-video': { opt: 'resolution', prices: { '480P': 8, '720P': 16, '1080P': 32 } },
+  'kling-4/reference-to-video': { opt: 'resolution', prices: { '720p': 28.5, '1080p': 42.5 }, videoInput: { opt: 'video_urls', prices: { '720p': 17, '1080p': 25.5 } } },
+  'kling-4/keyframe-to-video': { opt: 'resolution', prices: { '720p': 28.5, '1080p': 42.5 } },
+  'pixverse-v6-max/text-to-video': { opt: 'quality', prices: { '360p': 4.8, '540p': 7.2, '720p': 8.8, '1080p': 17.6 }, audio: { opt: 'generate_audio_switch', prices: { '360p': 7.2, '540p': 8.8, '720p': 12, '1080p': 22.4 } } },
+  'pixverse-v6-max/image-to-video': { opt: 'quality', prices: { '360p': 4.8, '540p': 7.2, '720p': 8.8, '1080p': 17.6 }, audio: { opt: 'generate_audio_switch', prices: { '360p': 7.2, '540p': 8.8, '720p': 12, '1080p': 22.4 } } },
+  'pixverse-v6/text-to-video': { opt: 'quality', prices: { '360p': 4, '540p': 5.6, '720p': 7.2, '1080p': 14.4 }, audio: { opt: 'generate_audio_switch', prices: { '360p': 5.6, '540p': 7.2, '720p': 9.6, '1080p': 18.4 } } },
+  'pixverse-v6/image-to-video': { opt: 'quality', prices: { '360p': 4, '540p': 5.6, '720p': 7.2, '1080p': 14.4 }, audio: { opt: 'generate_audio_switch', prices: { '360p': 5.6, '540p': 7.2, '720p': 9.6, '1080p': 18.4 } } },
 };
 
 export const PRICING_ESTIMATED = new Set([
@@ -230,7 +284,9 @@ export const PRICING_ESTIMATED = new Set([
   'bytedance/v1-lite-image-to-video',  // same tiers and default
   'wan/flash-image-to-video',   // #69: measured 6-8 cr/s (varies — possibly by input size); kie publishes no rate
   'wan/flash-video-to-video',   // #69: assumed same as flash I2V
-  'bytedance/seedance-2-5',
+  'bytedance/seedance-2-5', 'bytedance/seedance-2-5-draft',
+  'vidu-q4/image-to-video', 'vidu-q4/reference-to-video',
+  'kling-4/reference-to-video', 'kling-4/keyframe-to-video', 'pixverse-v6-max/text-to-video', 'pixverse-v6-max/image-to-video', 'omnihuman-2-0',
   'pixverse-v6/text-to-video',
   'pixverse-v6/image-to-video',
   'pixverse-v6/transition',
@@ -238,9 +294,10 @@ export const PRICING_ESTIMATED = new Set([
   'pixverse-v6/reference-to-video',
   'google/gemini-3-1-flash-tts',
   'google/gemini-2-5-pro-tts',
+  'google/gemini-3-8-flash-tts',
+  'google/gemini-3-8-flash-lite-tts',
   'wan/2-5-text-to-video',
   'wan/2-5-image-to-video',
-  'suno/voice-generate',
   'suno/voice-regenerate',
   'happyhorse/text-to-video',
   'happyhorse/image-to-video',
@@ -248,6 +305,8 @@ export const PRICING_ESTIMATED = new Set([
   'happyhorse/video-edit',
   'gemini-omni/video',
   'gemini-omni/flash-1-1',
+  'nano-banana-2', 'nano-banana-2-1',  // resolution-tiered; table prices 1K
+  'flux-3/klein-text-to-image', 'flux-3/klein-edit-image',  // resolution-tiered 1.6/2.5/6.5
   'gpt-image-2-5/flare-text-to-image', 'gpt-image-2-5/flare-image-to-image',  // resolution-tiered 6/10/16
   'gpt-image-2-5/sunburst-text-to-image', 'gpt-image-2-5/sunburst-image-to-image',
   'qwen2-1/text-to-image', 'qwen2-1/image-to-image',  // 2K doubles

@@ -27,8 +27,8 @@ Just ask Claude things like:
 
 ### Image (60+)
 - **OpenAI**: GPT Image 2.5 Flare / Sunburst (NEW — 1K-4K, transparent background), GPT Image 2, GPT-4o Image, GPT Image 1.5
-- **Google**: Nano Banana 2 / 2 Lite (NEW) / Pro / Edit / Original, Imagen 4 (Fast/Standard/Ultra)
-- **Black Forest Labs**: Flux Kontext Pro/Max, Flux 2 Pro/Flex
+- **Google**: Nano Banana 2.1 (NEW, 4 cr), Nano Banana 2 / 2 Lite / Pro / Edit / Original, Imagen 4 (Fast/Standard/Ultra)
+- **Black Forest Labs**: FLUX 3 Klein T2I + Edit (NEW, 1.6 cr), Flux Kontext Pro/Max, Flux 2 Pro/Flex
 - **ByteDance**: Seedream 3.0 / 4.0 / 4.5 / 5.0 Lite
 - **Alibaba**: Wan 2.7 Image / Image Pro
 - **Ideogram**: v3, Character, Edit, Remix, Reframe
@@ -41,14 +41,14 @@ Just ask Claude things like:
 ### Video (85+)
 - **Google Veo 3.1**: Quality / Fast / Lite (T2V + I2V), Extend, 1080p/4K upscale
 - **Alibaba HappyHorse**: 1.1 (NEW — T2V/I2V/R2V with native audio + 7-language lip-sync), 1.0 (T2V/I2V/R2V/Video Edit)
-- **ByteDance Seedance**: 2.5 (NEW — 30s single takes, live Aug 2026) / 2.0 / 2.0 Fast / 2.0 Mini / 1.5 Pro
-- **Kuaishou Kling**: 3.0 Omni "O3" (NEW — per-shot multi_prompt scripting, 4K, video Transformation), 3.0, 3.0 Turbo, 2.6, V2.5 Turbo, V2.1 Master/Pro/Standard, AI Avatar
+- **ByteDance Seedance**: 2.5 (30s single takes, 1080p, draft→1080p upgrade) / 2.0 / 2.0 Fast / 2.0 Mini (1.5 Pro retired upstream Oct 2026)
+- **Kuaishou Kling**: 4.0 (NEW — reference-to-video with named @subjects/voices/video refs, keyframe-to-video, 3-30s), 3.0 Omni "O3" (NEW — per-shot multi_prompt scripting, 4K, video Transformation), 3.0, 3.0 Turbo, 2.6, V2.5 Turbo, V2.1 Master/Pro/Standard, AI Avatar
 - **Alibaba Wan**: 3.0 + 3.0 Prime (NEW — unified prompt-or-media, audio), 2.7 (T2V/I2V/Edit/R2V), 2.6, 2.5, 2.2 Turbo, Animate
 - **Google Gemini Omni**: Video + 1.1 Flash (NEW — first→last-frame mode, 360p-4K; image/voice/video/character references)
 - **MiniMax Hailuo**: H3 (NEW — 2K + native stereo audio, image+video+audio references, first→last-frame I2V), 2.3 Pro/Standard, 02 Pro/Standard
 - **xAI Grok Imagine**: Video 1.5 preview (NEW — I2V with native audio, cheapest audio video), T2V, I2V, Upscale, Extend
-- **Avatar / lip-sync**: OmniHuman 1.5 (NEW — audio-driven full-body avatar + free subject-detection + human-identification utilities), Volcengine Video Lip-Sync (NEW — re-dub existing footage), Kling AI Avatar, Infinitalk
-- **PixVerse V6** (NEW): T2V, I2V (viral templates), Transition (first→last morph), Fusion R2V (@ref_name), Extend — budget all-rounder with native audio
+- **Avatar / lip-sync**: OmniHuman 2.0 (NEW — 14 cr/s, up to 5-minute audio), OmniHuman 1.5 (NEW — audio-driven full-body avatar + free subject-detection + human-identification utilities), Volcengine Video Lip-Sync (NEW — re-dub existing footage), Kling AI Avatar, Infinitalk
+- **PixVerse V6 / V6 Max** (V6 Max NEW: higher-quality T2V/I2V): T2V, I2V (viral templates), Transition (first→last morph), Fusion R2V (@ref_name), Extend — budget all-rounder with native audio
 - **Runway**: Aleph, Aleph Edit, Extend
 - **Others**: ByteDance V1 Pro/Lite, Topaz upscale
 
@@ -104,26 +104,29 @@ claude mcp add -s user kie-art /usr/bin/env -- KIE_API_KEY=your-key node /path/t
 
 ### Run as HTTP MCP (Cowork, remote clients)
 
+HTTP mode requires a bearer token and listens on `127.0.0.1` by default.
+
 ```bash
+export KIE_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
 KIE_API_KEY=your-key node server.mjs --http --port=3100
 ```
 
-Then expose via ngrok / Cloudflare Tunnel / VPS deployment:
-```bash
-ngrok http 3100
-```
-
-Configure your MCP client to use the resulting URL:
+Configure your MCP client with the URL and the token:
 ```json
 {
   "mcpServers": {
     "kie-art": {
       "type": "http",
-      "url": "https://your-tunnel.ngrok-free.dev/mcp"
+      "url": "http://127.0.0.1:3100/mcp",
+      "headers": { "Authorization": "Bearer <your KIE_MCP_AUTH_TOKEN>" }
     }
   }
 }
 ```
+
+To reach it remotely, put it behind a tunnel (ngrok / Cloudflare Tunnel) or a reverse proxy. The server stays on loopback and the tunnel forwards to it. Add the tunnel's hostname to `KIE_MCP_ALLOWED_HOSTS`. Treat the token like a password: anyone who has it can spend your kie credits and upload media files from the server's disk.
+
+> **Security note (5.2.2):** earlier versions ran HTTP mode on `0.0.0.0` with no authentication and `Access-Control-Allow-Origin: *`. Any web page open in your browser, or anyone who had the tunnel URL, could call the tools, including reading local files through `upload_file`. Upgrade if you use `--http`.
 
 ## Environment variables
 
@@ -132,6 +135,13 @@ Configure your MCP client to use the resulting URL:
 | `KIE_API_KEY` | yes | Your kie.ai API key |
 | `KIE_PROJECT_ROOT` | no | Server-wide default for where generated files are saved (default: server cwd; files go to `$KIE_PROJECT_ROOT/kie/assets/raw/`). Per-call `download_dir` (absolute path) on any file-writing tool overrides this |
 | `KIE_MCP_PORT` | no | Port for HTTP mode (default: 3100) |
+| `KIE_SUNO_API` | no | `legacy` sends Suno tools to kie's old Suno endpoints. Default since 5.5.0 is kie's new market API (`ai-music-api/*`), which reports the actual credits charged. MIDI, mashup and voice cloning always use the old endpoints |
+| `KIE_ELEVENLABS_ENABLED` | no | `1` re-enables the ElevenLabs tools (paused since 5.4.0 while kie's ElevenLabs integration fails) |
+| `KIE_MAX_CREDITS_PER_CALL` | no | Default spending cap per tool call, in credits. Calls whose estimate exceeds it are refused before submission; a per-call `max_credits` overrides it |
+| `KIE_MCP_AUTH_TOKEN` | HTTP mode | Bearer token HTTP clients must send (`Authorization: Bearer …`). The server refuses to start in HTTP mode without it |
+| `KIE_MCP_HOST` | no | HTTP bind address (default `127.0.0.1`). Set `0.0.0.0` only inside a container or behind a firewall |
+| `KIE_MCP_ALLOWED_HOSTS` | no | Comma-separated extra `Host` header names to accept (e.g. your tunnel hostname). On loopback, localhost names are always accepted; other hosts are rejected to block DNS rebinding |
+| `KIE_MCP_ALLOWED_ORIGINS` | no | Comma-separated browser origins allowed to call the server (CORS). Requests with any other `Origin` header are rejected. Non-browser MCP clients send no Origin and are unaffected |
 | `KIE_CALLBACK_URL` | no | Callback URL sent with Suno generation requests (kie.ai requires the field; results are fetched by polling regardless). Defaults to an inert placeholder — set this only if you want to receive the callbacks yourself |
 | `KIE_MAX_CONCURRENT` | no | Max simultaneous task-creation calls (default 4). Excess parallel generations queue inside the server instead of hitting kie.ai's rate limits — parallel tool calls are safe |
 | `KIE_POLL_BUDGET_IMAGE` / `_VIDEO` / `_AUDIO` / `_SPEECH` | no | Blocking-mode polling budget per tool category, in seconds (defaults: 600 / 900 / 300 / 300). Per-call `max_wait_seconds` takes precedence. For long generations prefer `wait: false` (async mode): the tool returns the `task_id` immediately; poll with `check_task`, fetch with `download_result` |
@@ -150,11 +160,25 @@ add_instrumental, add_vocals, replace_section,
 convert_to_wav, separate_vocals, boost_style,
 get_timestamped_lyrics, audio_isolation, speech_to_text,
 profile_brief,
-list_models, check_task, list_tasks, check_credits,
+list_models, check_task, list_tasks, check_credits, spend_report,
 download_result, list_raw_assets, upload_file,
 grok_segment_map, grok_image_edit, seedream_layer_decompose,
 veo_extend, veo_upscale_1080p, veo_upscale_4k, runway_extend
 ```
+
+## Cost control
+
+kie bills per call, and a few calls are expensive (1080p/4K video, layer splits, 1080p draft upgrades). Every paid tool takes two optional parameters:
+
+- **`estimate_only: true`** returns the estimated credits from published rates, including resolution/size tiers and video duration, **without submitting anything**.
+- **`max_credits: N`** refuses to submit when the estimate exceeds `N`. Set `KIE_MAX_CREDITS_PER_CALL` to apply a default cap to every call.
+
+```text
+generate_video { model: "bytedance/seedance-2-5", model_options: { resolution: "1080p", duration: 10 }, estimate_only: true }
+→ 💰 ~1580 credits (~$7.90) — 158 cr/s × 10s. Nothing was submitted.
+```
+
+**`spend_report`** shows where the credits went. It totals the server's task history over the last N days, by model or by day, using the **actual** amounts kie charged (it looks up any missing ones), and lists failed tasks separately.
 
 ## Smart model recommendations
 
@@ -205,6 +229,21 @@ npm run smoke   # live end-to-end over MCP stdio — needs KIE_API_KEY
 ```
 
 `server.mjs` guards its side effects behind a main-module check, so it can be imported by tests (`test/unit.test.mjs`) to exercise the pure helpers without starting a server. `test/harness.mjs` is a reusable stdio JSON-RPC client for driving the real server in smoke/integration checks. CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the syntax check + unit tests on Node 20 and 22 for every push and PR.
+
+### Live check (run this weekly)
+
+```bash
+npm run live-check   # KIE_API_KEY from env, else ~/.claude.json kie-art
+```
+
+Runs the whole maintenance routine in about 2 minutes and writes `live-check-report.md`:
+
+1. **Docs-index diff:** docs.kie.ai pages added or removed since the last run. This is the most reliable new-model signal.
+2. **Drift watch with live slug probes:** price drift, paused/removed models, catalog changes.
+3. **Watch list:** real calls to models that were failing upstream (e.g. ElevenLabs), so you know when to re-enable them. Failures cost 0 credits.
+4. **`npm audit`** summary.
+
+Run it from your own machine. GitHub-hosted runners can't fetch kie.ai pages, so the scheduled workflow below only reports that it's blind.
 
 ### Drift watch
 

@@ -9,10 +9,10 @@ upstream `main`.
 | | |
 |---|---|
 | Upstream | `elibarnett/kie-mcp` |
-| Pinned base commit | `53330db` (tag `v5.2.0`, upstream `main` on 2026-09-22) |
+| Pinned base commit | `747dbe3` (upstream `main` on 2026-10-28, = tag `v5.10.0` + one fix commit) |
 | Fork branch | `contentkaki` (default branch) |
-| Release tags | `ck-v<upstream version>-<n>`, e.g. `ck-v5.2.0-1` |
-| Install | `npx -y github:ivaneecreator-web/kie-mcp#ck-v5.2.0-1` |
+| Release tags | `ck-v<upstream version>-<n>`, e.g. `ck-v5.10.0-1` |
+| Install | `npx -y github:ivaneecreator-web/kie-mcp#ck-v5.10.0-1` |
 
 ## What this fork changes
 

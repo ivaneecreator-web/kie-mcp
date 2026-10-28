@@ -2,6 +2,198 @@
 
 All notable changes to kie-mcp will be documented here.
 
+## [5.10.0] — 2026-10-27
+
+Closes #123, #124, #125, #126, #127, all filed by the weekly live check.
+
+### Added
+
+- **Kling 4.0** (#123):
+  - **`kling-4/reference-to-video`**: 3–30 s, 720p/1080p, native audio. Prompts @-mention up to 10 reference images (`@image_1…`), up to 5 reference videos (`@video_1…`), up to 7 named **elements** (`@Hero`: 2–4 views or a 3–8 s video, optional bound voice) and up to 3 standalone **voices**. The builder validates names (unique, not reserved like `image_N` / `first_frame`), image-vs-video subjects and the 5-video total before submitting.
+  - **`kling-4/keyframe-to-video`**: first frame, up to 8 middle keyframes and a last frame; `image_urls` map to [first, …middle, last].
+  - Pricing: 28.5 / 42.5 cr/s (720p/1080p); with video input 17 / 25.5 cr/s on input + output duration. That isn't inverted, as the issue suspected: it's the same billing model as Seedance 2.5.
+- **PixVerse V6 Max** (#124): `pixverse-v6-max/text-to-video` and `/image-to-video` (one image), 1–15 s, 360p–1080p, optional audio. Per second (no audio | audio): 360p 4.8|7.2, 540p 7.2|8.8, 720p 8.8|12, 1080p 17.6|22.4. No template or multi-clip modes.
+- **OmniHuman 2.0** (#125): `omnihuman-2-0`, one image + 4–300 s of audio → 720p lip-synced performance, **14 cr/s** (OmniHuman 1.5: 27 cr/s, ≤ 60 s). **The watermark is off by default**: kie's default is on, so the entry sends `enable_watermark: false` unless asked.
+- **Spending guard:** tiers for all of the above, plus audio-aware tiers for PixVerse V6 / V6 Max and a with-video-input rate for Kling 4.0. Audio-driven models (OmniHuman 1.5 / 2.0) estimate from `model_options.audio_duration` and otherwise flag the estimate as assuming 15 s.
+
+- **Live 2026-10-27, all through the MCP tools:**
+  - Kling 4.0 R2V, 3 s @720p with a named `@Hero` element from 2 views plus a scene image: **85.5 cr**.
+  - Kling 4.0 keyframe, first→last, 3 s: **85.5 cr**.
+  - PixVerse V6 Max T2V and I2V, 360p 1 s: **4.8 cr** each.
+  - OmniHuman 2.0 driven by an 8 s Gemini TTS clip uploaded via `upload_file`: **112 cr** (14 × 8), 8.0 s output, no watermark.
+
+### Removed
+
+- **Seedance 1.5 Pro** (#126): kie now answers `410 — "retired upstream and is no longer available"`. Both entries and their pricing are removed; use Seedance 2.x.
+
+### Fixed
+
+- **Drift watch counted retired models as healthy.** A `410`, or a message about being "retired / no longer available / deprecated", is now `gone`. That's why Seedance 1.5's retirement only surfaced through the docs diff.
+- **`live-check` double-counted vulnerabilities**, adding npm's `total` field to the per-severity counts.
+
+### Security
+
+- `npm audit fix` (#127): body-parser, zod, fast-uri, hono and ip-address advisories, all transitive. `npm audit`: 0.
+
+## [5.9.0] — 2026-10-19
+
+### Added
+
+- **FLUX 3 Klein** (#121), found by the weekly live-check. Both endpoints were added:
+  - `flux-3/klein-text-to-image`: 9 aspect ratios including 21:9 and 9:21.
+  - `flux-3/klein-edit-image`: up to 10 reference images, which cost nothing extra; aspect ratio `auto` matches the first image.
+  - Both take `resolution` (1K/2K/4K), `output_format` (png/jpeg/webp), `enhance_prompt` (on by default; kie rewrites the prompt) and `seed`.
+  - Price: 1.6 / 2.5 / 6.5 cr per image at 1K / 2K / 4K. Live on 2026-10-19, a 1K run on each endpoint charged exactly 1.6 cr and took about 25 s. This is now the cheapest image model in the registry, and the spending guard estimates each tier.
+
+## [5.8.0] — 2026-10-14
+
+### Added
+
+- **Spending guard.** Every paid tool (33 of them) takes `estimate_only` and `max_credits`, and `KIE_MAX_CREDITS_PER_CALL` sets a default cap.
+  - The estimate uses published rates, including resolution/size tiers (Nano Banana 2/2.1, GPT Image 2.5, Qwen, Seedream 5 Pro, Vidu Q4, Seedance 2.5 including draft mode, MiniMax H3, Grok video, Wan 3.0), and multiplies by duration for video.
+  - Layer splits and TTS are marked as estimates.
+  - `estimate_only` submits nothing, and an over-cap call is refused before submission. Both were verified live: the balance was unchanged.
+- **`spend_report` tool.** It totals spend from the task history over N days, by model or by day, using kie's **actual** `creditsConsumed`, which is now recorded when each task finishes (poll or `check_task`). Missing charges are looked up from kie, including market-API Suno tasks; Suno's short task names map to their prices; failed tasks are listed separately. Live: every task in a 30-day window resolved to actual charges.
+- **`npm run live-check`** (`scripts/live-check.mjs`), the maintenance routine in one command, about 2 minutes:
+  - docs-index diff against a cached copy;
+  - the drift watch with live slug probes;
+  - real watch-list probes for models down upstream (ElevenLabs);
+  - an `npm audit` summary.
+  It writes `live-check-report.md`.
+
+## [5.7.1] — 2026-10-14
+
+### Changed
+
+- **Vidu Q4 reference-to-video works now.** kie fixed the launch failure, and a 3 s @540p run on 2026-10-14 succeeded for 21.6 cr. It's slow (about 20 minutes for that clip), longer than the default 15-minute video wait, so the entry now advises `wait: false` + `check_task` / `download_result` instead of warning that it's broken.
+
+## [5.7.0] — 2026-10-12
+
+### Added
+
+- **Vidu Q4**, a new video family on kie:
+  - `vidu-q4/image-to-video`: one image, 3–16 s, 540p/720p/1080p/2K/4K, native audio on by default. Per second: 7.2 / 15.2 / 19.2 / 30.4 / 62.4 cr, so it's one of the cheapest audio-capable I2V options at 540p and one of the few at 4K.
+  - `vidu-q4/reference-to-video`: 1–15 reference images plus up to 3 reference audio clips, 5 aspect ratios, same prices. **At launch every request fails upstream** ("Internal Error", 0 cr), including kie's own docs example, so the entry carries a warning. It needs no code change when kie fixes it.
+- **Seedance 2.5 draft pipeline:**
+  - `bytedance/seedance-2-5` gains `draft: true`, a 480p preview at 28 cr/s.
+  - The new `bytedance/seedance-2-5-draft` upgrades the approved take to 1080p (pass `model_options.draft_task_id`), billed at the standard 1080p rate (158 cr/s without video input) × the draft's duration. Iterate cheaply, then pay for 1080p only on the keeper. kie requires `output_format` on the upgrade even though its docs list only `draft_task_id` + `resolution`; the entry always sends it.
+- **Live 2026-10-12:** Vidu Q4 I2V 3 s @540p = 21.6 cr; Seedance 2.5 draft 4 s = 112 cr, and its 1080p upgrade = 632 cr (158 × 4), which returned the 1080p video.
+
+### Changed
+
+- **Seedance 2.5 catches up with kie's schema:**
+  - `1080p` (kie exposed only 480p/720p when we probed in July) and `adaptive` aspect ratio.
+  - `last_frame_url`, up to 30 reference images, `reference_video_urls` (10), `reference_audio_urls` (10), `web_search`, `return_last_frame`, `output_format`.
+  - **`generate_audio` now documents kie's real default (on)**, and an explicit `false` is now sent. Before, our schema claimed audio defaulted to off but only ever sent `true`, so kie's on-by-default applied silently.
+
+## [5.6.1] — 2026-10-08
+
+### Security
+
+- **Dependencies:** `@modelcontextprotocol/sdk` floor raised to `^1.32.1` and the lockfile refreshed, which pulls `proxy-addr` 2.0.8. This clears two advisories published 2026-10-07/08: [GHSA-6qxp-vccf-f47h](https://github.com/advisories/GHSA-6qxp-vccf-f47h) (high, SDK ≤ 1.30.1, the OAuth **client** could send credentials to an authorization server the MCP server picks) and [GHSA-jqcg-44mw-7w3h](https://github.com/advisories/GHSA-jqcg-44mw-7w3h) (critical, `proxy-addr` IP spoofing via IPv4-mapped IPv6 trust subnets). **kie-mcp doesn't use either code path:** it's an MCP server, not an OAuth client, and its HTTP mode runs on Node's `http` without Express. Scanners flagged them anyway. `npm audit`: 0.
+
+## [5.6.0] — 2026-10-07
+
+### Added
+
+- **Nano Banana 2.1** (`nano-banana-2-1`), new on kie: 4 / 6 / 9 cr at 1K / 2K / 4K, up to 10 reference images, 15 aspect ratios including 1:4, 4:1, 1:8 and 8:1. Live 2026-10-07: 1K 4.0 cr in about 13–17 s, 2K 6.0 cr; reference editing and 1:8 work. In a same-prompt comparison with NB2 both rendered the sign text correctly; NB2 had richer scene detail, 2.1 a cleaner composition.
+- Nano Banana 2 gains the 1:4, 4:1, 1:8 and 8:1 aspect ratios its docs list.
+
+### Changed
+
+- **Nano Banana 2 repriced 4 → 8 cr** (12 at 2K, 18 at 4K). kie doubled it when 2.1 launched; the live 1K charge was 8.0, and it took about 40–60 s against 2.1's 13 s. The model guide, registry comparisons and pricing table are updated.
+- **Profiles:** the explicit draft tiers (architecture exterior and interior, game-assets environment concept, product-photography concept) now route to `nano-banana-2-1`. Production and consistency tiers stay on `nano-banana-2`, which allows 14 refs to 2.1's 10, with corrected 8 cr notes that mention 2.1 as the budget option.
+
+## [5.5.0] — 2026-10-05
+
+**Suno now runs on kie's new market API.** In October 2026 kie moved the whole Suno API onto its generic task endpoint (`/api/v1/jobs/createTask` with `ai-music-api/*` models and snake_case inputs). The old endpoints still work (their docs say `deprecated: false`, with no shutdown date), so this is a planned migration with an instant way back: set `KIE_SUNO_API=legacy`.
+
+### Fixed
+
+- **`generate_lyrics` timed out on the legacy endpoint.** It polled `/generate/record-info`, which never sees lyrics tasks; the correct record is `/api/v1/lyrics/record-info`. The market API doesn't have this problem, and `KIE_SUNO_API=legacy` now polls the right record.
+
+### Changed
+
+- **17 Suno tools moved to the market API:** generate_music, generate_sfx, generate_sounds, extend_music, cover_audio, add_instrumental, add_vocals, replace_section, upload_extend_audio, generate_lyrics, convert_to_wav, separate_vocals, create_music_video, generate_persona, boost_style, get_timestamped_lyrics, generate_cover_art. Each tool still builds its request as before. `sunoCreate` translates it (camelCase→snake_case, legacy-only fields dropped), the market record is polled, and the result is reshaped into the legacy `sunoData` shape, so the tool logic is unchanged. Results now carry `creditsConsumed`.
+- **Stay on the legacy endpoints:**
+  - **MIDI:** on the market API the notes arrive only via callback; the record holds just a reference ID.
+  - **Mashup:** the market version takes uploaded audio URLs, not generated `audioIds`.
+  - **The voice-clone trio:** the new flow can't be verified without a human voice recording.
+- **Suno model versions:** added **V6, V6_MINI and V6_WILD**, and dropped V3_5 (not offered on the market API). The default stays V5.
+- **`separate_vocals` `type: "split_stem_advanced"`** (new on the market API).
+- **Track outputs show each track's `audioId`**, which is needed to chain into WAV, stems, video, persona, timestamped lyrics and extend. It used to be visible only through check_task.
+- **`replace_section` requires `fullLyrics`** (the complete lyrics with the section already edited), as the market API does. The section must be 10–480 s.
+- **`upload_extend_audio` requires `continueAt`.** kie documents it as optional, but every call without it fails upstream. It also always sends `instrumental`, since the old endpoint rejected a null value, so this tool was failing on the old API as well.
+- **`extend_music` / `upload_extend_audio`:** `prompt` is now described as the LYRICS for the extension, which is how both APIs use it. A short instruction like "add an outro" is rejected as malformed lyrics (error 531, refunded).
+- **`get_timestamped_lyrics`** returns the word timings and summarizes the waveform, instead of dumping hundreds of numbers.
+- **Suno prices updated to kie's published rates**, most confirmed by live charges on 2026-10-05:
+  - music, extend, cover, add-instrumental, add-vocals, upload-extend and mashup 10 → **12**;
+  - replace-section 8 → **5**; separate-vocals 5 → **10** (split_stem 50); music video 8 → **2**; sounds 5 → **2.5**;
+  - lyrics 2 → **0.4**; WAV 2 → **0.4**; style boost 2 → **0.4**; timestamped lyrics 2 → **0.5**;
+  - persona, cover art and voice-generate are now **free**.
+
+## [5.4.0] — 2026-10-05
+
+### Added
+
+- **Seedream 5.0 Flash** — `seedream/5-flash-text-to-image` and `seedream/5-flash-image-to-image` (up to 10 refs), 3.24 cr flat at 1K, 1.5K or 2K (Pro is 7/14). Also `seedream_layer_decompose` `tier: "flash"` at 3.24 cr per output layer; its prompt is optional. Live: T2I @2K and I2I each charged 3.24. A prompt-less Flash layer split of a poster returned 12 layers for 38.88 cr, so the tool now warns to name the elements to separate.
+
+### Changed
+
+- **ElevenLabs tools paused** — `generate_tts`, `generate_dialogue`, `audio_isolation` and `speech_to_text` now return at once with a pointer to the alternative (Gemini TTS, or local tools for isolation/transcription), instead of a doomed round trip. Every ElevenLabs task on kie has failed with "Internal Error" since 2026-09-22 21:50 UTC, re-verified 09-23, 09-28 and 10-05, and nothing was charged. Set `KIE_ELEVENLABS_ENABLED=1` to try ElevenLabs anyway.
+
+### Fixed
+
+- **Drift watch** — "2,800 credits" now parses as 2800 (it used to read 800), and token-metered prices ("… / 1M tokens") are no longer compared with the per-minute table estimate. Together these removed the recurring Gemini TTS false positives.
+
+## [5.3.0] — 2026-09-28
+
+September 28 model pass: new Gemini 3.8 TTS models, a fix for Grok region edits (kie split the endpoint), and price corrections. Everything below was verified with live calls.
+
+### Added
+
+- **Gemini 3.8 Flash TTS** (`generate_gemini_tts` `model: "flash-3.8"`) and **Gemini 3.8 Flash Lite TTS** (`model: "flash-lite"`). They take the same inputs as 3.1 Flash (speakers, dialogue_turns, scene, tone tags). kie's limited-time pricing to 2026-12-31 is 1,260 and 840 cr per 1M audio-output tokens (vs 2,800 for 3.1 Flash), about 1.9 and 1.3 cr/min. The same 25-word line charged 1.38 cr on 3.1 Flash, 0.82 on 3.8 Flash and 0.29 on 3.8 Flash Lite. Flash Lite hit one kie queue error before succeeding. The default stays `flash` (3.1).
+- **Grok whole-image edit** accepts `aspect_ratio: "auto"` and up to 5 `image_urls`.
+
+### Fixed
+
+- **Grok region edits were broken** — kie moved region edits (`task_id` + `mask_indexs`) to the new `grok-imagine-image-2-0/segment-edit` slug. The old `…/image-edit` now takes only whole-image input and rejects region input with `500 This field is required`, so every `grok_image_edit` region-mode call has been failing. Region mode now calls `segment-edit`.
+
+### Changed (pricing)
+
+- Recraft Crisp Upscale 2 → **0.5** cr (drift watch; live charge 0.5).
+
+## [5.2.2] — 2026-09-28
+
+Security release. **Upgrade now if you run `--http`.** stdio users (the default) were not exposed to the HTTP issues, but should still upgrade for the upload restriction.
+
+### Security
+
+- **HTTP mode was unauthenticated and open to any website.** `--http` listened on `0.0.0.0`, with no authentication and `Access-Control-Allow-Origin: *`. Any web page open in the user's browser (DNS rebinding / cross-origin requests), or anyone who had the ngrok URL the README suggested, could call every tool. That meant spending kie credits and reading any local file by `upload_file`-ing it to a public URL. HTTP mode now:
+  - **requires `KIE_MCP_AUTH_TOKEN`** (`Authorization: Bearer …`, constant-time compare); the server refuses to start without one;
+  - **binds to `127.0.0.1` by default** (`KIE_MCP_HOST` to override; the Docker images set `0.0.0.0` inside the container, and compose still publishes on 127.0.0.1 only);
+  - **rejects browser `Origin`s** not in `KIE_MCP_ALLOWED_ORIGINS`, and sends CORS headers only to those (never `*`);
+  - **rejects `Host` headers** other than localhost when bound to loopback (DNS-rebinding guard; `KIE_MCP_ALLOWED_HOSTS` adds tunnel hostnames).
+  **Breaking for HTTP users:** set a token and add the `Authorization` header to the client config (see README).
+- **`upload_file` `file_path` only publishes media.** It used to read and publish any file it was pointed at, so a prompt-injected agent could leak `~/.ssh/id_rsa` or `.env` as a public URL, even in stdio mode. The file's *bytes* must now be a recognized image, audio, video, MIDI or PDF, so renaming a secret to `.png` doesn't get it through.
+- **SSRF guard** — the Veo image preflight (added in 5.2.1) and the `file_url` sniff could make the server fetch internal addresses. Both now refuse private, loopback, link-local (incl. the `169.254.169.254` cloud metadata endpoint) and CGNAT addresses, checked after DNS resolution. `file_url`'s old hostname-only check is replaced by the same resolver-based guard.
+- **Dependencies** — `@modelcontextprotocol/sdk` floor raised to `^1.30.1` and the lockfile refreshed. `npm audit` now reports 0, down from 4 high, 3 moderate and 1 low, all transitive via the SDK's Express/Hono stack, which kie-mcp doesn't use. Fresh `npx` installs of 5.2.1 were already clean, because the lockfile isn't published; the stale lockfile only affected installs from a clone of the repo.
+
+### Fixed
+
+- `Dockerfile.local` now copies `data/` — the image couldn't start since the registries moved there (#46).
+- `/health` reports the version from `SERVER_INFO` (one less version string to bump) and no longer exposes the session count.
+
+## [5.2.1] — 2026-09-24
+
+### Fixed
+
+- **Downloads keep their real format** (#107) — `downloadToFile` (used by every tool that saves a result) now reads the magic bytes: JPEG/PNG/WebP/GIF, MP4/MOV/M4A, MP3, WAV and MIDI. If the requested extension disagrees, it saves under the correct one (container aliases like .mov for MP4 are left alone). A Seedream JPEG requested as `maria-retail-1.png` is now saved as `maria-retail-1.jpg`, and the tool result says so with the real path. Before this, the JPEG bytes were written silently under the `.png` name; upload_file then served them as image/png, which broke Veo I2V.
+- **upload_file names images by their real format** (#108). kie's upload host serves files with a Content-Type taken from the filename. A JPEG saved as `.png` was therefore served as `image/png`, and Veo image-to-video rejected it with a misleading "The Google model was unable to generate audio" failure on every tier and prompt. (Kling and Grok Imagine tolerate the mismatch.) All three upload paths (file_path, file_url, base64_data) now read the magic bytes (JPEG/PNG/WebP/GIF), fix the extension, and say so in the result.
+- **Seedream 4.0 T2I price** 3.5 → 5 cr (live charge).
+- **Veo I2V preflight** — `generate_video` on `veo-*` models range-GETs each `image_urls` entry and refuses a Content-Type/bytes mismatch up front, with the fix, instead of spending a task on it.
+- **Veo I2V "unable to generate audio" guidance** — across 20 live runs, a type-mismatched image failed 7/7 (now blocked by the preflight). Correctly-typed images still hit this error about half the time: roughly 60% succeeded with an explicit sound cue in the prompt ("SFX: …") vs 20% without. The error now says to retry the same call, add a sound cue, or use Kling/Grok I2V, instead of implying the prompt content is wrong. The generate_video model guide recommends the sound cue.
+
 ## [5.2.0] — 2026-09-22
 
 September 2026 model pass: 4 new model families found via a docs-index diff, plus price corrections from the drift watch. Every new endpoint was run live (all succeeded except Gemini Omni 1.1 Flash, which timed out upstream), and every corrected price was confirmed by a real charge except Imagen 4 Standard/Ultra and 2K H3.
